@@ -1,0 +1,310 @@
+import pygame  
+import numpy
+import heapq 
+import sys
+import math
+import random
+#class Enviriment{}
+#class Robot{}
+
+# Определение цветов
+# (R, G, B) format
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+LIGHT_GRAY = (200, 200, 200)
+RED = (255, 0, 0) # Добавлен красный цвет для объекта
+GREEN = (0, 255, 0)  # Цвет для лучей лидара
+YELLOW = (255, 255, 0)  # Цвет для точек пересечения
+
+# Параметры окна
+WINDOW_WIDTH = 1000
+WINDOW_HEIGHT = 1000
+
+# Параметры сетки
+GRID_SIZE = 100 # Размер ячейки в пикселях
+
+# Параметры объекта
+OBJECT_SIZE = 50
+# Начальные координаты объекта (верхний левый угол), привязанные к сетке
+player_x = 50
+player_y = 50
+# Скорость перемещения (равна размеру ячейки)
+object_speed = GRID_SIZE
+
+distance_data = []
+
+def draw_grid(screen):
+    """Функция для отрисовки сетки на экране."""
+    for x in range(0, WINDOW_WIDTH, GRID_SIZE):
+        pygame.draw.line(screen, LIGHT_GRAY, (x, 0), (x, WINDOW_HEIGHT), 1)
+    for y in range(0, WINDOW_HEIGHT, GRID_SIZE):
+        pygame.draw.line(screen, LIGHT_GRAY, (0, y), (WINDOW_WIDTH, y), 1)
+
+def draw_object(screen, x, y):
+    """Функция для отрисовки перемещаемого объекта."""
+    # Рисуем красный круг в текущих координатах
+    pygame.draw.circle(screen, RED, (player_x, player_y,), 35)
+
+def lidar_window_collision(position_x, position_y, angle, max_distance=None):
+    """
+    Определяет пересечение луча лидара с границами окна.
+    
+    Args:
+        position_x, position_y: позиция лидара
+        angle: угол луча в градусах
+        max_distance: максимальная длина луча (если None, то до границы окна)
+        
+    Returns:
+        (distance, collision_point_x, collision_point_y, side): 
+        - distance: расстояние до границы окна (или max_distance)
+        - collision_point_x, collision_point_y: точка пересечения с границей
+        - side: сторона окна ('top', 'bottom', 'left', 'right')
+    """
+    x, y = position_x, position_y
+    angle_rad = math.radians(angle)
+    
+    # Вычисляем направляющий вектор луча
+    dx = math.cos(angle_rad)
+    dy = math.sin(angle_rad)
+    
+    # Определяем, с какими сторонами окна может пересечься луч
+    intersections = []
+    
+    # Пересечение с левой границей (x = 0)
+    if dx > 0:  # Луч движется вправо
+        t_left = (0 - x) / dx if dx != 0 else float('inf')
+        if t_left > 0:
+            intersect_y = y + t_left * dy
+            if 0 <= intersect_y <= WINDOW_HEIGHT:
+                intersections.append((t_left, (0, intersect_y), 'left'))
+    
+    # Пересечение с правой границей (x = WINDOW_WIDTH)
+    if dx < 0:  # Луч движется влево
+        t_right = (WINDOW_WIDTH - x) / dx if dx != 0 else float('inf')
+        if t_right > 0:
+            intersect_y = y + t_right * dy
+            if 0 <= intersect_y <= WINDOW_HEIGHT:
+                intersections.append((t_right, (WINDOW_WIDTH, intersect_y), 'right'))
+    
+    # Пересечение с верхней границей (y = 0)
+    if dy > 0:  # Луч движется вниз
+        t_top = (0 - y) / dy if dy != 0 else float('inf')
+        if t_top > 0:
+            intersect_x = x + t_top * dx
+            if 0 <= intersect_x <= WINDOW_WIDTH:
+                intersections.append((t_top, (intersect_x, 0), 'top'))
+    
+    # Пересечение с нижней границей (y = WINDOW_HEIGHT)
+    if dy < 0:  # Луч движется вверх
+        t_bottom = (WINDOW_HEIGHT - y) / dy if dy != 0 else float('inf')
+        if t_bottom > 0:
+            intersect_x = x + t_bottom * dx
+            if 0 <= intersect_x <= WINDOW_WIDTH:
+                intersections.append((t_bottom, (intersect_x, WINDOW_HEIGHT), 'bottom'))
+    
+    # Находим ближайшее пересечение
+    if intersections:
+        # Сортируем по расстоянию (параметр t)
+        intersections.sort(key=lambda x: x[0])
+        
+        for t, point, side in intersections:
+            # Проверяем, что точка внутри окна
+            px, py = point
+            if 0 <= px <= WINDOW_WIDTH and 0 <= py <= WINDOW_HEIGHT:
+                # Преобразуем в пиксельное расстояние
+                pixel_distance = t  # t уже является расстоянием
+                
+                # Если задано max_distance, ограничиваем луч
+                if max_distance is not None and pixel_distance > max_distance:
+                    # Вычисляем конечную точку на max_distance
+                    end_x = x + dx * max_distance
+                    end_y = y + dy * max_distance
+                    
+                    # Проверяем, находится ли конечная точка внутри окна
+                    if 0 <= end_x <= WINDOW_WIDTH and 0 <= end_y <= WINDOW_HEIGHT:
+                        return max_distance, end_x, end_y, None
+                    else:
+                        # Точка за пределами окна, возвращаем пересечение с границей
+                        return pixel_distance, px, py, side
+                
+                return pixel_distance, px, py, side
+    
+    # Если нет пересечений с границами (луч направлен внутрь окна на всем протяжении)
+    if max_distance is not None:
+        # Проверяем, доходит ли луч до max_distance внутри окна
+        end_x = x + dx * max_distance
+        end_y = y + dy * max_distance
+        
+        if 0 <= end_x <= WINDOW_WIDTH and 0 <= end_y <= WINDOW_HEIGHT:
+            return max_distance, end_x, end_y, None
+        else:
+            # Если конечная точка за пределами окна, находим где именно
+            return lidar_window_collision(x, y, angle, None)
+    
+    # Если max_distance не задан и нет пересечений, возвращаем None
+    return None, None, None, None
+
+def simulate_lidar_2d(position_x, position_y, angle, obstacles, max_distance, fov, rays):
+    """
+    Симуляция 2D лидара с учетом границ окна.
+    
+    Args:
+        position_x, position_y: позиция лидара
+        angle: текущий угол поворота лидара (градусы)
+        obstacles: игнорируется (оставлен для совместимости)
+        max_distance: максимальная дальность сканирования
+        fov: поле зрения (градусы, обычно 360)
+        rays: количество лучей
+        
+    Returns:
+        Список кортежей: (distance, point_x, point_y, side) для каждого луча
+    """
+    scan_data = []
+    angle_step = fov / rays if rays > 0 else 0
+    
+    for i in range(rays):
+        current_angle = angle + i * angle_step
+        
+        distance, point_x, point_y, side = lidar_window_collision(
+            position_x, position_y, current_angle, max_distance
+        )
+        
+        if distance is None:
+            distance = max_distance
+            point_x = position_x + max_distance * math.cos(math.radians(current_angle))
+            point_y = position_y + max_distance * math.sin(math.radians(current_angle))
+            side = None
+        
+        scan_data.append((distance, point_x, point_y, side))
+        
+    
+    return scan_data
+
+def draw_lidar_scan(screen, position_x, position_y, scan_data):
+    """
+    Отрисовка скана лидара.
+    
+    Args:
+        screen: поверхность Pygame
+        position_x, position_y: позиция лидара
+        scan_data: данные сканирования от simulate_lidar_2d
+    """
+    # Создаем временную поверхность для плавной отрисовки лучей
+    lidar_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+    
+    for i, (distance, point_x, point_y, side) in enumerate(scan_data):
+        if distance is not None and point_x is not None and point_y is not None:
+            # Цвет луча зависит от расстояния (ближе - ярче)
+            intensity = max(50, 255 - int((distance / 300) * 200))
+            ray_color = (0, intensity, 100, 100)  # RGBA
+            
+            # Рисуем луч
+            pygame.draw.line(lidar_surface, ray_color, 
+                            (position_x, position_y), 
+                            (point_x, point_y), 1)
+            
+            # Рисуем точку пересечения
+            if side is not None:  # Только если это пересечение с границей
+                pygame.draw.circle(screen, YELLOW, (int(point_x), int(point_y)), 3)
+    
+    # Накладываем лучи на экран
+    screen.blit(lidar_surface, (0, 0))
+    
+    # Рисуем центр лидара
+    pygame.draw.circle(screen, GREEN, (int(position_x), int(position_y)), 8)
+    pygame.draw.circle(screen, (0, 200, 0), (int(position_x), int(position_y)), 5)
+
+def main():
+    """Основная функция программы."""
+    global player_x, player_y # Объявляем переменные глобальными, чтобы изменять их в функции main
+
+    pygame.init()
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("Pygame Grid with Moving Object and Lidar")
+    
+    clock = pygame.time.Clock() # Добавляем часы для управления FPS
+
+    # Переменные для управления лидаром
+    show_lidar = True
+    lidar_rays = 36  # Количество лучей (меньше для производительности)
+    lidar_fov = 360  # Поле зрения
+    lidar_max_distance = 300  # Максимальная дальность
+    
+    running = True
+    while running:
+        # Получаем данные сканирования лидара
+        lidar_data = simulate_lidar_2d(
+            player_x, player_y, 
+            0,  # Угол поворота лидара
+            None,  # Препятствия игнорируются
+            lidar_max_distance,
+            lidar_fov,
+            lidar_rays
+        )
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            
+            # Обработка нажатий клавиш
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_LEFT:
+                    # Перемещаем влево, но не выходим за левую границу
+                    player_x = max(50, player_x - object_speed)
+                if event.key == pygame.K_RIGHT:
+                    # Перемещаем вправо, но не выходим за правую границу
+                    player_x = min(WINDOW_WIDTH - OBJECT_SIZE, player_x + object_speed)
+                if event.key == pygame.K_UP:
+                    # Перемещаем вверх, но не выходим за верхнюю границу
+                    player_y = max(50, player_y - object_speed)
+                if event.key == pygame.K_DOWN:
+                    # Перемещаем вниз, но не выходим за нижнюю границу
+                    player_y = min(WINDOW_HEIGHT - OBJECT_SIZE, player_y + object_speed)
+                if event.key == pygame.K_l:
+                    # Включение/выключение лидара
+                    show_lidar = not show_lidar
+                if event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
+                    # Увеличиваем количество лучей
+                    lidar_rays = min(360, lidar_rays + 12)
+                if event.key == pygame.K_MINUS:
+                    # Уменьшаем количество лучей
+                    lidar_rays = max(12, lidar_rays - 12)
+                if event.key == pygame.K_i:
+                    # Выводим значения лидара
+                    print(lidar_data)
+
+        
+        # Заливаем фон белым цветом
+        screen.fill(WHITE)
+        
+        # Отрисовываем сетку
+        draw_grid(screen)
+
+        # Отрисовываем объект
+        draw_object(screen, player_x, player_y)
+
+        # Отрисовываем лидар, если включен
+        if show_lidar:
+            draw_lidar_scan(screen, player_x, player_y, lidar_data)
+            
+            # Отображаем информацию о лидаре
+            font = pygame.font.Font(None, 24)
+            info_text = f"Лидар: {lidar_rays} лучей, дальность: {lidar_max_distance}"
+            text_surface = font.render(info_text, True, BLACK)
+            screen.blit(text_surface, (10, 10))
+            
+            # Отображаем текущие координаты
+            coord_text = f"Позиция: ({player_x}, {player_y})"
+            coord_surface = font.render(coord_text, True, BLACK)
+            screen.blit(coord_surface, (10, 35))
+
+        # Обновляем содержимое экрана
+        pygame.display.flip()
+        
+        # Ограничиваем FPS для стабильности
+        clock.tick(60)
+
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()
