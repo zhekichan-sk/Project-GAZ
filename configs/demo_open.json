@@ -1,0 +1,10 @@
+{
+  "environment": {
+    "name": "Open Space",
+    "width": 1500,
+    "height": 1200,
+    "background_color": [255, 255, 255]
+  },
+  "obstacles": []
+}
+
