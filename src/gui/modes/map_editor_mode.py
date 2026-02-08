@@ -96,7 +96,7 @@ class MapEditorMode(BaseMode):
     
     def on_mouse_click(self, pos: tuple, button: int) -> None:
         """Обрабатывает клик мыши."""
-        if button == 1:  # ЛКМ
+        if button == 1:  # ЛКМ - размещение препятствия
             edge_info = self.get_hovered_edge(pos[0], pos[1])
             if edge_info:
                 edge_type, edge_x, edge_y = edge_info
@@ -108,4 +108,17 @@ class MapEditorMode(BaseMode):
                     angle=angle
                 )
                 self.environment.obstacles.add_placed_obstacle(placed_obstacle)
+        elif button == 3:  # ПКМ - удаление препятствия
+            mouse_x, mouse_y = pos
+            # Ищем препятствие под курсором
+            obstacles_to_remove = []
+            for obstacle in self.environment.obstacles.get_placed_obstacles():
+                if isinstance(obstacle, RectangleObstacle):
+                    if obstacle.contains_point(mouse_x, mouse_y):
+                        obstacles_to_remove.append(obstacle)
+            
+            # Удаляем найденные препятствия
+            for obstacle in obstacles_to_remove:
+                if obstacle in self.environment.obstacles.get_placed_obstacles():
+                    self.environment.obstacles.get_placed_obstacles().remove(obstacle)
 

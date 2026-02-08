@@ -89,13 +89,15 @@ class Renderer:
         self._render_lidar_points(scan)
     
     def _render_lidar_points(self, scan: LidarScan) -> None:
-        """Отрисовывает точки лидара (зеленые индикаторы)."""
+        """Отрисовывает точки лидара (зеленые индикаторы, оптимизировано)."""
         max_range = getattr(scan, 'max_range', 300.0)
-        for i, point in enumerate(scan.points):
+        # Отрисовываем только каждый 10-й луч для производительности
+        for i in range(0, len(scan.points), 10):
             if i < len(scan.distances) and scan.distances[i] < max_range:
+                point = scan.points[i]
                 # Только зеленые точки для индикации
                 pygame.draw.circle(self.screen, self.colors['green'],
-                                 (int(point.x), int(point.y)), 2)
+                                 (int(point.x), int(point.y)), 3)
     
     def render_occupancy_grid(self, grid: Optional[OccupancyGrid], alpha: int = 128) -> None:
         """

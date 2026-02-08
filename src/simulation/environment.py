@@ -35,10 +35,17 @@ class Environment:
         Returns:
             True если позиция валидна, False если есть коллизия
         """
-        # Проверка границ среды
-        if point.x - radius < 0 or point.x + radius > self.width:
+        # Параметры сетки (должны совпадать с редактором карты)
+        GRID_START_X = 200
+        GRID_START_Y = 100
+        GRID_END_X = 1200
+        GRID_END_Y = 1100
+        
+        # Проверка границ сетки (робот должен ходить только по сетке)
+        # Центр робота должен быть не ближе radius от границ сетки
+        if point.x < GRID_START_X + radius or point.x > GRID_END_X - radius:
             return False
-        if point.y - radius < 0 or point.y + radius > self.height:
+        if point.y < GRID_START_Y + radius or point.y > GRID_END_Y - radius:
             return False
         
         # Проверка коллизий с препятствиями

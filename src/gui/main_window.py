@@ -74,7 +74,7 @@ class MainWindow:
         
         # Инициализация симуляции
         self.environment = environment or Environment(width, height, Obstacles())
-        self.robot = robot or Robot(x=400.0, y=300.0, theta=0.0)
+        self.robot = robot or Robot(x=450.0, y=350.0, theta=0.0)
         self.lidar = lidar or Lidar(num_rays=360, max_range=300.0)
         self.occupancy_grid = occupancy_grid
         self.mapper = mapper
@@ -86,13 +86,13 @@ class MainWindow:
         self.map_editor_mode = MapEditorMode(self.environment)
         self.blind_robot_mode = BlindRobotMode(self.robot, self.environment, self.lidar)
         
-        # Кнопки для переключения режимов (левее и ниже)
-        self.button_editor_rect = pygame.Rect(10, height - 120, 180, 40)
-        self.button_blind_rect = pygame.Rect(10, height - 70, 180, 40)
+        # Кнопки для переключения режимов (справа)
+        self.button_editor_rect = pygame.Rect(width - 200, height - 120, 180, 40)
+        self.button_blind_rect = pygame.Rect(width - 200, height - 70, 180, 40)
         
         # Кнопки для сохранения/загрузки карты
-        self.button_save_rect = pygame.Rect(10, height - 170, 180, 40)
-        self.button_load_rect = pygame.Rect(10, height - 220, 180, 40)
+        self.button_save_rect = pygame.Rect(width - 200, height - 170, 180, 40)
+        self.button_load_rect = pygame.Rect(width - 200, height - 220, 180, 40)
         
         # Флаг выбора позиции робота
         self.selecting_robot_position = False
@@ -145,7 +145,11 @@ class MainWindow:
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Проверка клика по кнопкам
-                if self.button_editor_rect.collidepoint(mouse_pos):
+                if self.button_save_rect.collidepoint(mouse_pos):
+                    self._save_map()
+                elif self.button_load_rect.collidepoint(mouse_pos):
+                    self._load_map()
+                elif self.button_editor_rect.collidepoint(mouse_pos):
                     self.current_app_mode = AppMode.EDITOR
                 elif self.button_blind_rect.collidepoint(mouse_pos):
                     self.current_app_mode = AppMode.BLIND_ROBOT
@@ -271,10 +275,11 @@ class MainWindow:
         pygame.draw.circle(self.screen, preview_color, (mouse_x, mouse_y), int(self.robot.radius))
         pygame.draw.circle(self.screen, (0, 0, 0), (mouse_x, mouse_y), int(self.robot.radius), 2)
         
-        # Инструкция
-        font = pygame.font.Font(None, 36)
+        # Инструкция (слева от сетки, чтобы не залезала на нее)
+        font = pygame.font.Font(None, 40)
         instruction = font.render("Выберите начальную позицию робота (ЛКМ)", True, (0, 0, 0))
-        self.screen.blit(instruction, (self.width // 2 - instruction.get_width() // 2, 50))
+        # Размещаем слева от сетки (сетка начинается с X=400)
+        self.screen.blit(instruction, (50, 50))
     
     def _render_buttons(self) -> None:
         """Отрисовывает все кнопки."""
@@ -319,6 +324,10 @@ class MainWindow:
         import tkinter as tk
         from tkinter import filedialog
         
+        # Определяем путь к папке Maps
+        maps_dir = os.path.join(project_root, "Maps")
+        os.makedirs(maps_dir, exist_ok=True)
+        
         # Используем диалог выбора файла
         root = tk.Tk()
         root.withdraw()  # Скрываем главное окно
@@ -326,7 +335,7 @@ class MainWindow:
         file_path = filedialog.asksaveasfilename(
             defaultextension=".pkl",
             filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
-            initialdir=os.path.join(project_root, "maps"),
+            initialdir=maps_dir,
             title="Сохранить карту"
         )
         
@@ -334,9 +343,14 @@ class MainWindow:
         
         if file_path:
             try:
+                # Убеждаемся, что файл сохраняется в папку Maps
+                if not file_path.startswith(maps_dir):
+                    # Если пользователь выбрал другую папку, используем Maps
+                    filename = os.path.basename(file_path)
+                    file_path = os.path.join(maps_dir, filename)
+                
                 # Создаем директорию если не существует
-                maps_dir = os.path.dirname(file_path) if os.path.dirname(file_path) else "maps"
-                os.makedirs(maps_dir, exist_ok=True)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 
                 # Сохраняем препятствия
                 obstacles_data = []
@@ -370,13 +384,17 @@ class MainWindow:
         from tkinter import filedialog
         from src.simulation.obstacles import RectangleObstacle
         
+        # Определяем путь к папке Maps
+        maps_dir = os.path.join(project_root, "Maps")
+        os.makedirs(maps_dir, exist_ok=True)
+        
         # Используем диалог выбора файла
         root = tk.Tk()
         root.withdraw()
         
         file_path = filedialog.askopenfilename(
             filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
-            initialdir=os.path.join(project_root, "maps"),
+            initialdir=maps_dir,
             title="Загрузить карту"
         )
         

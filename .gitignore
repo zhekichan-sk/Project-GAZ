@@ -38,6 +38,7 @@ ENV/
 Thumbs.db
 
 # Project specific
+Maps/*.pkl
 maps/*.pkl
 *.pkl
 !configs/*.json
