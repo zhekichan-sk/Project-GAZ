@@ -40,7 +40,11 @@ class ScanMatcher:
             
             # Преобразуем точку скана в глобальные координаты с учетом новой позы
             # Угол луча относительно робота
-            ray_angle = scan.angles[idx] if idx < len(scan.angles) else 0.0
+            if hasattr(scan, 'angles') and idx < len(scan.angles):
+                ray_angle = scan.angles[idx]
+            else:
+                # Если углы недоступны, вычисляем из точки
+                ray_angle = math.atan2(point.y - scan.robot_pose.y, point.x - scan.robot_pose.x) - scan.robot_pose.theta
             dist = scan.distances[idx]
             
             # Глобальный угол

@@ -160,4 +160,81 @@ class Renderer:
         points = [(int(p.x), int(p.y)) for p in trajectory]
         pygame.draw.lines(self.screen, self.colors['trajectory'],
                          False, points, 2)
+    
+    def render_minimap(self, grid: Optional[OccupancyGrid], robot_pose: Optional[Point] = None, 
+                       estimated_pose: Optional[Point] = None, 
+                       size: int = 200, position: tuple = None) -> None:
+        """
+        Отрисовывает мини-карту в правом верхнем углу.
+        
+        Args:
+            grid: карта занятости для отображения
+            robot_pose: реальная позиция робота (Point)
+            estimated_pose: оцененная позиция робота (Point)
+            size: размер мини-карты в пикселях
+            position: позиция мини-карты (x, y), если None - правый верхний угол
+        """
+        if grid is None:
+            return
+        
+        # Определяем позицию мини-карты (правый верхний угол)
+        screen_width = self.screen.get_width()
+        if position is None:
+            minimap_x = screen_width - size - 10
+            minimap_y = 10
+        else:
+            minimap_x, minimap_y = position
+        
+        # Создаем поверхность для мини-карты
+        minimap_surface = pygame.Surface((size, size))
+        minimap_surface.fill((50, 50, 50))  # Темно-серый фон
+        
+        # Масштабируем карту для мини-карты
+        scale_x = size / grid.width
+        scale_y = size / grid.height
+        scale = min(scale_x, scale_y)
+        
+        # Отрисовываем карту
+        for i in range(grid.height):
+            for j in range(grid.width):
+                cell_value = grid.get_cell(i, j)
+                
+                # Преобразуем в координаты мини-карты
+                x = int(j * scale)
+                y = int(i * scale)
+                cell_size = max(1, int(scale))
+                
+                # Цвет в зависимости от вероятности занятости
+                if cell_value < 0.4:  # Свободно
+                    color = (255, 255, 255)  # Белый
+                elif cell_value > 0.6:  # Занято
+                    color = (0, 0, 0)  # Черный
+                else:  # Неизвестно
+                    color = (128, 128, 128)  # Серый
+                
+                pygame.draw.rect(minimap_surface, color, 
+                                (x, y, cell_size, cell_size))
+        
+        # Отрисовываем реальную позицию робота (синий)
+        if robot_pose:
+            robot_i, robot_j = grid.world_to_grid(robot_pose)
+            robot_x = int(robot_j * scale)
+            robot_y = int(robot_i * scale)
+            pygame.draw.circle(minimap_surface, (0, 150, 255), 
+                             (robot_x, robot_y), max(2, int(scale * 2)))
+        
+        # Отрисовываем оцененную позицию робота (красный)
+        if estimated_pose:
+            est_i, est_j = grid.world_to_grid(estimated_pose)
+            est_x = int(est_j * scale)
+            est_y = int(est_i * scale)
+            pygame.draw.circle(minimap_surface, (255, 0, 0), 
+                             (est_x, est_y), max(2, int(scale * 2)))
+        
+        # Рамка мини-карты
+        pygame.draw.rect(minimap_surface, (255, 255, 255), 
+                        (0, 0, size, size), 2)
+        
+        # Отображаем мини-карту на экране
+        self.screen.blit(minimap_surface, (minimap_x, minimap_y))
 

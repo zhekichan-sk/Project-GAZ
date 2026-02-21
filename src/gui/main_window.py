@@ -35,6 +35,8 @@ from src.gui.renderer import Renderer
 from src.gui.hud import HUD
 from src.gui.modes.map_editor_mode import MapEditorMode
 from src.gui.modes.blind_robot_mode import BlindRobotMode
+from src.gui.modes.mapping_mode import MappingMode
+from src.gui.modes.localization_mode import LocalizationMode
 from src.simulation.robot import Robot
 from src.simulation.environment import Environment
 from src.simulation.lidar import Lidar
@@ -43,12 +45,17 @@ from src.mapping.occupancy_grid import OccupancyGrid
 from src.mapping.mapper import Mapper
 from src.localization.localizer import Localizer
 from src.navigation.path_planner import PathPlanner
+from src.common.types import Point
+import random
+import math
 
 
 class AppMode:
     """Режимы приложения."""
     EDITOR = "editor"  # Редактор карты
     BLIND_ROBOT = "blind"  # Слепой робот
+    MAPPING = "mapping"  # Картографирование
+    LOCALIZATION = "localization"  # Локализация
 
 
 class MainWindow:
@@ -82,9 +89,19 @@ class MainWindow:
         self.path_planner = path_planner
         
         # Режимы приложения
-        self.current_app_mode = initial_mode  # "editor" или "blind"
+        self.current_app_mode = initial_mode  # "editor", "blind", "mapping", "localization"
         self.map_editor_mode = MapEditorMode(self.environment)
         self.blind_robot_mode = BlindRobotMode(self.robot, self.environment, self.lidar)
+        self.mapping_mode = MappingMode(self.robot, self.environment, self.lidar)
+        self.localization_mode = LocalizationMode(self.robot, self.environment, self.lidar)
+        
+        # Для режима локализации - оцененная позиция
+        self.estimated_pose = None
+        self.localization_confidence = 0.0
+        
+        # Если начальный режим - картографирование, размещаем робота в случайной клетке
+        if self.current_app_mode == AppMode.MAPPING and self.occupancy_grid:
+            self._reset_mapping_mode()
         
         # Кнопки для переключения режимов (справа)
         self.button_editor_rect = pygame.Rect(width - 200, height - 120, 180, 40)
@@ -136,12 +153,24 @@ class MainWindow:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+                elif event.key == pygame.K_1:
+                    # Режим картографирования
+                    self.current_app_mode = AppMode.MAPPING
+                    self._reset_mapping_mode()
+                elif event.key == pygame.K_2:
+                    # Режим локализации
+                    self.current_app_mode = AppMode.LOCALIZATION
+                    self._reset_localization_mode()
                 elif event.key == pygame.K_c:
                     # Очистка
                     if self.current_app_mode == AppMode.EDITOR:
                         self.environment.obstacles.clear_placed_obstacles()
                     elif self.current_app_mode == AppMode.BLIND_ROBOT:
                         self.blind_robot_mode.clear_history()
+                    elif self.current_app_mode == AppMode.MAPPING:
+                        if self.occupancy_grid and self.mapper:
+                            self.mapper.reset()
+                            self._reset_mapping_mode()
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Проверка клика по кнопкам
@@ -177,6 +206,21 @@ class MainWindow:
             # Обновление карты занятости
             if self.mapper and self.blind_robot_mode.last_scan:
                 self.mapper.update_from_scan(self.blind_robot_mode.last_scan)
+        elif self.current_app_mode == AppMode.MAPPING:
+            self.mapping_mode.update(dt, keys)
+            
+            # Обновление карты занятости на основе сканов лидара
+            if self.mapper and self.mapping_mode.last_scan:
+                self.mapper.update_from_scan(self.mapping_mode.last_scan)
+        elif self.current_app_mode == AppMode.LOCALIZATION:
+            self.localization_mode.update(dt, keys)
+            
+            # Локализация на основе мини-карты
+            if self.localizer and self.localization_mode.last_scan and self.occupancy_grid:
+                odometry_pose = self.robot.get_odometry()
+                result = self.localizer.localize(self.localization_mode.last_scan, odometry_pose)
+                self.estimated_pose = Point(result.pose.x, result.pose.y)
+                self.localization_confidence = result.confidence
     
     def render(self) -> None:
         """Отрисовывает содержимое."""
@@ -192,17 +236,46 @@ class MainWindow:
         elif self.current_app_mode == AppMode.BLIND_ROBOT:
             # Режим слепого робота
             self._render_blind_robot_mode()
+        elif self.current_app_mode == AppMode.MAPPING:
+            # Режим картографирования
+            self._render_mapping_mode()
+        elif self.current_app_mode == AppMode.LOCALIZATION:
+            # Режим локализации
+            self._render_localization_mode()
         
         # Отрисовка кнопок
         self._render_buttons()
+        
+        # Отрисовка мини-карты (если есть карта занятости)
+        if self.occupancy_grid and self.current_app_mode in [AppMode.MAPPING, AppMode.LOCALIZATION]:
+            robot_point = Point(self.robot.pose.x, self.robot.pose.y)
+            estimated_point = self.estimated_pose if self.current_app_mode == AppMode.LOCALIZATION else None
+            self.renderer.render_minimap(
+                self.occupancy_grid,
+                robot_pose=robot_point,
+                estimated_pose=estimated_point,
+                size=200,
+                position=(self.width - 210, 10)
+            )
         
         # Отрисовка HUD
         info = {'fps': self.clock.get_fps()}
         if self.selecting_robot_position:
             mode_name = "Выбор позиции робота"
+        elif self.current_app_mode == AppMode.MAPPING:
+            mode_name = "Картографирование"
+            if self.mapper:
+                info['mapping_progress'] = self.mapper.get_completion_percentage()
+        elif self.current_app_mode == AppMode.LOCALIZATION:
+            mode_name = "Локализация"
+            info['localization_confidence'] = self.localization_confidence
         else:
             mode_name = "Редактор карты" if self.current_app_mode == AppMode.EDITOR else "Слепой робот"
-        self.hud.render(self.robot, SimulationMode.MAPPING, info)
+        
+        sim_mode = SimulationMode.MAPPING if self.current_app_mode == AppMode.MAPPING else \
+                   SimulationMode.LOCALIZATION if self.current_app_mode == AppMode.LOCALIZATION else \
+                   SimulationMode.MAPPING
+        self.hud.render(self.robot, sim_mode, info)
         
         # Обновление экрана
         pygame.display.flip()
@@ -239,6 +312,122 @@ class MainWindow:
         # Отрисовка траектории
         if self.robot.trajectory:
             self.renderer.render_trajectory(self.robot.trajectory)
+    
+    def _render_mapping_mode(self) -> None:
+        """Отрисовывает режим картографирования."""
+        # Отрисовка сетки
+        self._draw_grid()
+        
+        # Отрисовка среды (препятствия)
+        self.renderer.render_environment(self.environment)
+        
+        # Отрисовка карты занятости (полупрозрачно)
+        if self.occupancy_grid:
+            self.renderer.render_occupancy_grid(self.occupancy_grid, alpha=128)
+        
+        # Отрисовка лидара
+        if self.mapping_mode.last_scan:
+            self.renderer.render_lidar_scan(
+                self.mapping_mode.last_scan,
+                "points"
+            )
+        
+        # Отрисовка робота
+        self.renderer.render_robot(self.robot)
+        
+        # Отрисовка траектории
+        if self.robot.trajectory:
+            self.renderer.render_trajectory(self.robot.trajectory)
+    
+    def _render_localization_mode(self) -> None:
+        """Отрисовывает режим локализации."""
+        # Отрисовка сетки
+        self._draw_grid()
+        
+        # Отрисовка среды (препятствия)
+        self.renderer.render_environment(self.environment)
+        
+        # Отрисовка карты занятости (полупрозрачно)
+        if self.occupancy_grid:
+            self.renderer.render_occupancy_grid(self.occupancy_grid, alpha=128)
+        
+        # Отрисовка лидара
+        if self.localization_mode.last_scan:
+            self.renderer.render_lidar_scan(
+                self.localization_mode.last_scan,
+                "points"
+            )
+        
+        # Отрисовка реальной позиции робота (синий)
+        self.renderer.render_robot(self.robot)
+        
+        # Отрисовка оцененной позиции робота (красный)
+        if self.estimated_pose:
+            x, y = int(self.estimated_pose.x), int(self.estimated_pose.y)
+            pygame.draw.circle(self.screen, (255, 0, 0), (x, y), 20, 3)
+            pygame.draw.circle(self.screen, (255, 0, 0), (x, y), 5)
+        
+        # Отрисовка траектории
+        if self.robot.trajectory:
+            self.renderer.render_trajectory(self.robot.trajectory)
+    
+    def _reset_mapping_mode(self) -> None:
+        """Сбрасывает режим картографирования и размещает робота в случайной клетке."""
+        if not self.occupancy_grid:
+            return
+        
+        # Размещаем робота в центре случайной клетки
+        # Получаем случайные индексы ячейки
+        random_i = random.randint(0, self.occupancy_grid.height - 1)
+        random_j = random.randint(0, self.occupancy_grid.width - 1)
+        
+        # Преобразуем в мировые координаты (центр ячейки)
+        world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+        
+        # Проверяем, что позиция валидна
+        if self.environment.is_valid_position(world_point, self.robot.radius):
+            self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+            self.robot.clear_trajectory()
+        else:
+            # Если позиция невалидна, пробуем другую
+            for _ in range(10):  # Максимум 10 попыток
+                random_i = random.randint(0, self.occupancy_grid.height - 1)
+                random_j = random.randint(0, self.occupancy_grid.width - 1)
+                world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+                if self.environment.is_valid_position(world_point, self.robot.radius):
+                    self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+                    self.robot.clear_trajectory()
+                    break
+    
+    def _reset_localization_mode(self) -> None:
+        """Сбрасывает режим локализации и телепортирует робота в случайное место."""
+        if not self.occupancy_grid:
+            return
+        
+        # Телепортируем робота в случайное место
+        random_i = random.randint(0, self.occupancy_grid.height - 1)
+        random_j = random.randint(0, self.occupancy_grid.width - 1)
+        world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+        
+        # Проверяем, что позиция валидна
+        if self.environment.is_valid_position(world_point, self.robot.radius):
+            self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+            self.robot.clear_trajectory()
+            # Сбрасываем оцененную позицию
+            self.estimated_pose = None
+            self.localization_confidence = 0.0
+        else:
+            # Если позиция невалидна, пробуем другую
+            for _ in range(10):  # Максимум 10 попыток
+                random_i = random.randint(0, self.occupancy_grid.height - 1)
+                random_j = random.randint(0, self.occupancy_grid.width - 1)
+                world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+                if self.environment.is_valid_position(world_point, self.robot.radius):
+                    self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+                    self.robot.clear_trajectory()
+                    self.estimated_pose = None
+                    self.localization_confidence = 0.0
+                    break
     
     def _draw_grid(self) -> None:
         """Отрисовывает сетку."""

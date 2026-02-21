@@ -46,6 +46,8 @@ class MappingMode(BaseMode):
             new_x = self.robot.pose.x + speed * math.cos(self.robot.pose.theta)
             new_y = self.robot.pose.y + speed * math.sin(self.robot.pose.theta)
             if self.environment.is_valid_position(Point(new_x, new_y), self.robot.radius):
+                # Обновляем одометрию
+                self.robot._update_odometry(speed, 0.0)
                 self.robot.pose.x = new_x
                 self.robot.pose.y = new_y
                 self.robot.add_trajectory_point()
@@ -55,6 +57,8 @@ class MappingMode(BaseMode):
             new_x = self.robot.pose.x - speed * math.cos(self.robot.pose.theta)
             new_y = self.robot.pose.y - speed * math.sin(self.robot.pose.theta)
             if self.environment.is_valid_position(Point(new_x, new_y), self.robot.radius):
+                # Обновляем одометрию
+                self.robot._update_odometry(-speed, 0.0)
                 self.robot.pose.x = new_x
                 self.robot.pose.y = new_y
                 self.robot.add_trajectory_point()
@@ -62,10 +66,12 @@ class MappingMode(BaseMode):
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
             # Поворот влево
             self.robot.pose.theta -= rotation_speed
+            self.robot._update_odometry(0.0, -rotation_speed)
         
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
             # Поворот вправо
             self.robot.pose.theta += rotation_speed
+            self.robot._update_odometry(0.0, rotation_speed)
         
         # Нормализация угла
         while self.robot.pose.theta > 2 * math.pi:
