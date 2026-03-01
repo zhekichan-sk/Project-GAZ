@@ -150,14 +150,16 @@ class AStar:
     def find_path(self, start: Point, goal: Point) -> Optional[List[Point]]:
         """
         Находит путь от старта до цели используя A*.
-        
+
         Args:
             start: начальная точка
             goal: целевая точка
-            
+
         Returns:
             Список точек пути или None если путь не найден
         """
+        # Обновляем inflated_grid по текущей карте (карта могла измениться после mapping)
+        self.inflated_grid = self.inflate_obstacles(self.grid, self.robot_radius)
         # Конвертируем в координаты сетки
         start_i, start_j = self.inflated_grid.world_to_grid(start)
         goal_i, goal_j = self.inflated_grid.world_to_grid(goal)

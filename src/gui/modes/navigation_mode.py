@@ -71,6 +71,17 @@ class NavigationMode(BaseMode):
         """Обрабатывает клик мыши (вызов set_goal из MainWindow)."""
         pass
     
+    def rebuild_path(self, path_planner) -> bool:
+        """Перестраивает путь от текущей позиции робота до существующей цели."""
+        if not self.goal or not path_planner:
+            return False
+        start = Point(self.robot.pose.x, self.robot.pose.y)
+        result = path_planner.plan(start, self.goal)
+        self.path_found = result.found
+        self.path = result.path if result.found else []
+        self.path_length = result.length if result.found else 0.0
+        return result.found
+    
     def clear_goal(self) -> None:
         """Сбрасывает цель и путь."""
         self.goal = None

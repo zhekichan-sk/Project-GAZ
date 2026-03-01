@@ -180,14 +180,17 @@ class AntColony:
     def find_path(self, start: Point, goal: Point) -> Optional[List[Point]]:
         """
         Находит путь алгоритмом муравьиных колоний.
-        
+
         Args:
             start: начальная точка
             goal: целевая точка
-            
+
         Returns:
             Список точек пути или None
         """
+        # Обновляем inflated_grid по текущей карте (карта могла измениться после mapping)
+        self.inflated_grid = self._inflate_obstacles(self.grid, self.robot_radius)
+        self._init_pheromones()
         start_ij = self.inflated_grid.world_to_grid(start)
         goal_ij = self.inflated_grid.world_to_grid(goal)
         

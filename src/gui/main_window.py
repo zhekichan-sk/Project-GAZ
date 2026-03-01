@@ -18,14 +18,10 @@ if sys.platform == 'win32':
 
 # Добавляем путь к корню проекта в sys.path для корректного импорта
 try:
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-except:
-    current_dir = os.getcwd()
-
-if os.path.basename(current_dir) == 'src':
-    project_root = os.path.dirname(current_dir)
-else:
-    project_root = current_dir
+    # main_window.py в src/gui/, корень — на 2 уровня выше
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+except Exception:
+    project_root = os.getcwd()
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -165,16 +161,24 @@ class MainWindow:
                     self.current_app_mode = AppMode.LOCALIZATION
                     self._reset_localization_mode()
                 elif event.key == pygame.K_3:
-                    # Режим навигации
+                    # Режим навигации — перестраиваем путь от текущей позиции робота до цели (если цель есть)
                     self.current_app_mode = AppMode.NAVIGATION
+                    if (self.navigation_mode.goal and self.path_planner and self.occupancy_grid):
+                        self.navigation_mode.rebuild_path(self.path_planner)
                 elif event.key == pygame.K_c:
-                    # Очистка
+                    # Очистка карты и связанных данных
                     if self.current_app_mode == AppMode.EDITOR:
                         self.environment.obstacles.clear_placed_obstacles()
+                        if self.occupancy_grid and self.mapper:
+                            self.mapper.reset()
+                        self.navigation_mode.clear_goal()
+                        self.estimated_pose = None
                     elif self.current_app_mode == AppMode.MAPPING:
                         if self.occupancy_grid and self.mapper:
                             self.mapper.reset()
                             self._reset_mapping_mode()
+                        self.navigation_mode.clear_goal()
+                        self.estimated_pose = None
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Проверка клика по кнопкам
@@ -596,8 +600,12 @@ class MainWindow:
                 with open(file_path, 'rb') as f:
                     map_data = pickle.load(f)
                 
-                # Очищаем текущие препятствия
+                # Очищаем текущие препятствия и данные карты
                 self.environment.obstacles.clear_placed_obstacles()
+                if self.occupancy_grid and self.mapper:
+                    self.mapper.reset()
+                self.navigation_mode.clear_goal()
+                self.estimated_pose = None
                 
                 # Загружаем препятствия
                 for obs_data in map_data.get('obstacles', []):

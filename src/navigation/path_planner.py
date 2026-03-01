@@ -61,10 +61,12 @@ class PathPlanner:
                 found=False
             )
         
-        length = self.get_path_length(path)
+        # Сглаживание: прямая линия когда возможно, повороты только для обхода препятствий
+        smoothed = self.smooth_path(path)
+        length = self.get_path_length(smoothed)
         
         return PathPlanningResult(
-            path=path,
+            path=smoothed,
             length=length,
             found=True
         )
@@ -104,23 +106,16 @@ class PathPlanner:
     
     def _is_line_clear(self, start: Point, end: Point) -> bool:
         """
-        Проверяет, свободна ли прямая линия между двумя точками.
+        Проверяет, свободна ли прямая линия между двумя точками (учитывая радиус робота).
         
-        Args:
-            start: начальная точка
-            end: конечная точка
-            
         Returns:
-            True если линия свободна
+            True если линия свободна, можно идти напрямую
         """
-        # Получаем ячейки вдоль линии
-        cells = self.grid.get_cells_along_ray(start, end)
-        
-        # Проверяем, что все ячейки свободны
+        grid = self.astar.inflated_grid  # сетка с учётом радиуса робота
+        cells = grid.get_cells_along_ray(start, end)
         for i, j in cells:
-            if self.grid.get_cell(i, j) >= 0.5:
+            if grid.get_cell(i, j) > 0.5:  # занято
                 return False
-        
         return True
     
     def is_goal_reachable(self, goal: Point) -> bool:
