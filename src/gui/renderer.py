@@ -32,30 +32,38 @@ class Renderer:
             'path': (0, 255, 0),
         }
     
-    def render_environment(self, env: Environment) -> None:
-        """Отрисовывает среду."""
-        # Отрисовка сетки
-        grid_size = 100
-        grid_start_x = 200
-        grid_start_y = 100
-        grid_end_x = 1200
-        grid_end_y = 1100
+    def render_environment(self, env: Environment, draw_boundaries: bool = True) -> None:
+        """Отрисовывает среду.
         
-        for x in range(grid_start_x, grid_end_x + 1, grid_size):
+        Args:
+            env: среда
+            draw_boundaries: рисовать ли жёлтые границы (False для режима слепого робота — рисуются поверх тумана)
+        """
+        # Отрисовка сетки (границы из среды)
+        gs = env.GRID_SIZE
+        for x in range(env.grid_left, env.grid_right + 1, gs):
             pygame.draw.line(
                 self.screen, self.colors['light_gray'],
-                (x, grid_start_y), (x, grid_end_y), 1
+                (x, env.grid_top), (x, env.grid_bottom), 1
             )
-        for y in range(grid_start_y, grid_end_y + 1, grid_size):
+        for y in range(env.grid_top, env.grid_bottom + 1, gs):
             pygame.draw.line(
                 self.screen, self.colors['light_gray'],
-                (grid_start_x, y), (grid_end_x, y), 1
+                (env.grid_left, y), (env.grid_right, y), 1
             )
         
         # Отрисовка препятствий
         if hasattr(env.obstacles, 'get_placed_obstacles'):
             for obstacle in env.obstacles.get_placed_obstacles():
                 self._render_obstacle(obstacle)
+        if draw_boundaries:
+            for obstacle in getattr(env, 'boundary_obstacles', []):
+                self._render_obstacle(obstacle)
+    
+    def render_boundary_obstacles(self, env: Environment) -> None:
+        """Отрисовывает жёлтые границы сетки (для режима слепого робота поверх тумана)."""
+        for obstacle in getattr(env, 'boundary_obstacles', []):
+            self._render_obstacle(obstacle)
     
     def _render_obstacle(self, obstacle) -> None:
         """Отрисовывает одно препятствие."""
@@ -160,4 +168,81 @@ class Renderer:
         points = [(int(p.x), int(p.y)) for p in trajectory]
         pygame.draw.lines(self.screen, self.colors['trajectory'],
                          False, points, 2)
+    
+    def render_minimap(self, grid: Optional[OccupancyGrid], robot_pose: Optional[Point] = None, 
+                       estimated_pose: Optional[Point] = None, 
+                       size: int = 200, position: tuple = None) -> None:
+        """
+        Отрисовывает мини-карту в правом верхнем углу.
+        
+        Args:
+            grid: карта занятости для отображения
+            robot_pose: реальная позиция робота (Point)
+            estimated_pose: оцененная позиция робота (Point)
+            size: размер мини-карты в пикселях
+            position: позиция мини-карты (x, y), если None - правый верхний угол
+        """
+        if grid is None:
+            return
+        
+        # Определяем позицию мини-карты (правый верхний угол)
+        screen_width = self.screen.get_width()
+        if position is None:
+            minimap_x = screen_width - size - 10
+            minimap_y = 10
+        else:
+            minimap_x, minimap_y = position
+        
+        # Создаем поверхность для мини-карты
+        minimap_surface = pygame.Surface((size, size))
+        minimap_surface.fill((50, 50, 50))  # Темно-серый фон
+        
+        # Масштабируем карту для мини-карты
+        scale_x = size / grid.width
+        scale_y = size / grid.height
+        scale = min(scale_x, scale_y)
+        
+        # Отрисовываем карту
+        for i in range(grid.height):
+            for j in range(grid.width):
+                cell_value = grid.get_cell(i, j)
+                
+                # Преобразуем в координаты мини-карты
+                x = int(j * scale)
+                y = int(i * scale)
+                cell_size = max(1, int(scale))
+                
+                # Цвет в зависимости от вероятности занятости
+                if cell_value < 0.4:  # Свободно
+                    color = (255, 255, 255)  # Белый
+                elif cell_value > 0.6:  # Занято
+                    color = (0, 0, 0)  # Черный
+                else:  # Неизвестно
+                    color = (128, 128, 128)  # Серый
+                
+                pygame.draw.rect(minimap_surface, color, 
+                                (x, y, cell_size, cell_size))
+        
+        # Отрисовываем реальную позицию робота (синий)
+        if robot_pose:
+            robot_i, robot_j = grid.world_to_grid(robot_pose)
+            robot_x = int(robot_j * scale)
+            robot_y = int(robot_i * scale)
+            pygame.draw.circle(minimap_surface, (0, 150, 255), 
+                             (robot_x, robot_y), max(2, int(scale * 2)))
+        
+        # Отрисовываем оцененную позицию робота (красный)
+        if estimated_pose:
+            est_i, est_j = grid.world_to_grid(estimated_pose)
+            est_x = int(est_j * scale)
+            est_y = int(est_i * scale)
+            pygame.draw.circle(minimap_surface, (255, 0, 0), 
+                             (est_x, est_y), max(2, int(scale * 2)))
+        
+        # Рамка мини-карты
+        pygame.draw.rect(minimap_surface, (255, 255, 255), 
+                        (0, 0, size, size), 2)
+        
+        # Отображаем мини-карту на экране
+        self.screen.blit(minimap_surface, (minimap_x, minimap_y))
 

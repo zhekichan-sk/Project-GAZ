@@ -12,6 +12,13 @@ from src.simulation.obstacles import Obstacles, RectangleObstacle
 class Environment:
     """Среда с препятствиями."""
     
+    # Отступы для вычисления области сетки
+    MARGIN_LEFT = 50
+    MARGIN_TOP = 50
+    MARGIN_RIGHT = 220  # панель справа (кнопки, мини-карта)
+    MARGIN_BOTTOM = 130
+    GRID_SIZE = 100
+    
     def __init__(self, width: int = 1500, height: int = 1200, obstacles: List = None):
         """
         Args:
@@ -23,6 +30,51 @@ class Environment:
         self.height = height
         self.obstacles = obstacles if obstacles else Obstacles()
         self.background_color = (255, 255, 255)
+        self.boundary_obstacles: List = []  # Жёлтые стены по границам сетки
+        self._update_grid_bounds()
+    
+    def _update_grid_bounds(self) -> None:
+        """Обновляет границы сетки и создаёт жёлтые стены по краям."""
+        self.grid_left = self.MARGIN_LEFT
+        self.grid_top = self.MARGIN_TOP
+        self.grid_right = self.width - self.MARGIN_RIGHT
+        self.grid_bottom = self.height - self.MARGIN_BOTTOM
+        # Выравниваем по размеру ячейки
+        grid_w = self.grid_right - self.grid_left
+        grid_h = self.grid_bottom - self.grid_top
+        cols = max(1, grid_w // self.GRID_SIZE)
+        rows = max(1, grid_h // self.GRID_SIZE)
+        self.grid_right = self.grid_left + cols * self.GRID_SIZE
+        self.grid_bottom = self.grid_top + rows * self.GRID_SIZE
+        
+        # Жёлтые стены по границам сетки (лидар не выходит за пределы)
+        wall_thick = 5
+        self.boundary_obstacles = [
+            # Левая стена
+            RectangleObstacle(
+                self.grid_left - wall_thick / 2,
+                (self.grid_top + self.grid_bottom) / 2,
+                wall_thick, self.grid_bottom - self.grid_top + wall_thick * 2, 0
+            ),
+            # Правая стена
+            RectangleObstacle(
+                self.grid_right + wall_thick / 2,
+                (self.grid_top + self.grid_bottom) / 2,
+                wall_thick, self.grid_bottom - self.grid_top + wall_thick * 2, 0
+            ),
+            # Верхняя стена
+            RectangleObstacle(
+                (self.grid_left + self.grid_right) / 2,
+                self.grid_top - wall_thick / 2,
+                self.grid_right - self.grid_left + wall_thick * 2, wall_thick, 0
+            ),
+            # Нижняя стена
+            RectangleObstacle(
+                (self.grid_left + self.grid_right) / 2,
+                self.grid_bottom + wall_thick / 2,
+                self.grid_right - self.grid_left + wall_thick * 2, wall_thick, 0
+            ),
+        ]
     
     def is_valid_position(self, point: Point, radius: float) -> bool:
         """
@@ -35,17 +87,11 @@ class Environment:
         Returns:
             True если позиция валидна, False если есть коллизия
         """
-        # Параметры сетки (должны совпадать с редактором карты)
-        GRID_START_X = 200
-        GRID_START_Y = 100
-        GRID_END_X = 1200
-        GRID_END_Y = 1100
-        
         # Проверка границ сетки (робот должен ходить только по сетке)
         # Центр робота должен быть не ближе radius от границ сетки
-        if point.x < GRID_START_X + radius or point.x > GRID_END_X - radius:
+        if point.x < self.grid_left + radius or point.x > self.grid_right - radius:
             return False
-        if point.y < GRID_START_Y + radius or point.y > GRID_END_Y - radius:
+        if point.y < self.grid_top + radius or point.y > self.grid_bottom - radius:
             return False
         
         # Проверка коллизий с препятствиями
@@ -96,6 +142,7 @@ class Environment:
     def raycast(self, origin: Point, angle: float, max_dist: float) -> float:
         """
         Трассировка луча до препятствия.
+        Луч ограничен границами сетки (лидар не выходит за пределы клетки).
         
         Args:
             origin: начало луча
@@ -105,48 +152,44 @@ class Environment:
         Returns:
             Расстояние до препятствия или max_dist если препятствия нет
         """
-        # Конечная точка луча
-        end_x = origin.x + max_dist * math.cos(angle)
-        end_y = origin.y + max_dist * math.sin(angle)
-        end_point = Point(end_x, end_y)
-        
         min_distance = max_dist
         
-        # Проверка границ среды
+        # Границы сетки (лидар не выходит за пределы)
         # Левая граница
         if math.cos(angle) < 0:
-            t = -origin.x / math.cos(angle)
+            t = (self.grid_left - origin.x) / math.cos(angle)
             if t > 0:
                 y = origin.y + t * math.sin(angle)
-                if 0 <= y <= self.height:
+                if self.grid_top <= y <= self.grid_bottom:
                     min_distance = min(min_distance, t)
         
         # Правая граница
         if math.cos(angle) > 0:
-            t = (self.width - origin.x) / math.cos(angle)
+            t = (self.grid_right - origin.x) / math.cos(angle)
             if t > 0:
                 y = origin.y + t * math.sin(angle)
-                if 0 <= y <= self.height:
+                if self.grid_top <= y <= self.grid_bottom:
                     min_distance = min(min_distance, t)
         
         # Верхняя граница
         if math.sin(angle) < 0:
-            t = -origin.y / math.sin(angle)
+            t = (self.grid_top - origin.y) / math.sin(angle)
             if t > 0:
                 x = origin.x + t * math.cos(angle)
-                if 0 <= x <= self.width:
+                if self.grid_left <= x <= self.grid_right:
                     min_distance = min(min_distance, t)
         
         # Нижняя граница
         if math.sin(angle) > 0:
-            t = (self.height - origin.y) / math.sin(angle)
+            t = (self.grid_bottom - origin.y) / math.sin(angle)
             if t > 0:
                 x = origin.x + t * math.cos(angle)
-                if 0 <= x <= self.width:
+                if self.grid_left <= x <= self.grid_right:
                     min_distance = min(min_distance, t)
         
-        # Проверка препятствий
-        for obstacle in self.obstacles.get_placed_obstacles():
+        # Проверка препятствий (размещённые + границы сетки)
+        all_obstacles = list(self.obstacles.get_placed_obstacles()) + self.boundary_obstacles
+        for obstacle in all_obstacles:
             if isinstance(obstacle, RectangleObstacle):
                 corners = obstacle.get_corners()
                 if len(corners) >= 3:

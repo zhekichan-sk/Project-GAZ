@@ -54,19 +54,19 @@ class BlindRobotMode(BaseMode):
         speed = self.robot.speed * dt
         rotation_speed = self.robot.rotation_speed * dt
         
-        # Параметры сетки (должны совпадать с редактором карты)
-        GRID_START_X = 200
-        GRID_START_Y = 100
-        GRID_END_X = 1200
-        GRID_END_Y = 1100
+        # Параметры сетки из среды
+        gx1 = self.environment.grid_left
+        gy1 = self.environment.grid_top
+        gx2 = self.environment.grid_right
+        gy2 = self.environment.grid_bottom
         
         if keys[pygame.K_w] or keys[pygame.K_UP]:
             new_x = self.robot.pose.x + speed * math.cos(self.robot.pose.theta)
             new_y = self.robot.pose.y + speed * math.sin(self.robot.pose.theta)
             from src.common.types import Point
             # Проверяем границы сетки
-            if (GRID_START_X + self.robot.radius <= new_x <= GRID_END_X - self.robot.radius and
-                GRID_START_Y + self.robot.radius <= new_y <= GRID_END_Y - self.robot.radius and
+            if (gx1 + self.robot.radius <= new_x <= gx2 - self.robot.radius and
+                gy1 + self.robot.radius <= new_y <= gy2 - self.robot.radius and
                 self.environment.is_valid_position(Point(new_x, new_y), self.robot.radius)):
                 self.robot.pose.x = new_x
                 self.robot.pose.y = new_y
@@ -77,8 +77,8 @@ class BlindRobotMode(BaseMode):
             new_y = self.robot.pose.y - speed * math.sin(self.robot.pose.theta)
             from src.common.types import Point
             # Проверяем границы сетки
-            if (GRID_START_X + self.robot.radius <= new_x <= GRID_END_X - self.robot.radius and
-                GRID_START_Y + self.robot.radius <= new_y <= GRID_END_Y - self.robot.radius and
+            if (gx1 + self.robot.radius <= new_x <= gx2 - self.robot.radius and
+                gy1 + self.robot.radius <= new_y <= gy2 - self.robot.radius and
                 self.environment.is_valid_position(Point(new_x, new_y), self.robot.radius)):
                 self.robot.pose.x = new_x
                 self.robot.pose.y = new_y

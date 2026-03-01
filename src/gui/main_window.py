@@ -35,6 +35,9 @@ from src.gui.renderer import Renderer
 from src.gui.hud import HUD
 from src.gui.modes.map_editor_mode import MapEditorMode
 from src.gui.modes.blind_robot_mode import BlindRobotMode
+from src.gui.modes.mapping_mode import MappingMode
+from src.gui.modes.localization_mode import LocalizationMode
+from src.gui.modes.navigation_mode import NavigationMode
 from src.simulation.robot import Robot
 from src.simulation.environment import Environment
 from src.simulation.lidar import Lidar
@@ -43,12 +46,18 @@ from src.mapping.occupancy_grid import OccupancyGrid
 from src.mapping.mapper import Mapper
 from src.localization.localizer import Localizer
 from src.navigation.path_planner import PathPlanner
+from src.common.types import Point
+import random
+import math
 
 
 class AppMode:
     """Режимы приложения."""
     EDITOR = "editor"  # Редактор карты
     BLIND_ROBOT = "blind"  # Слепой робот
+    MAPPING = "mapping"  # Картографирование
+    LOCALIZATION = "localization"  # Локализация
+    NAVIGATION = "navigation"  # Навигация
 
 
 class MainWindow:
@@ -74,7 +83,10 @@ class MainWindow:
         
         # Инициализация симуляции
         self.environment = environment or Environment(width, height, Obstacles())
-        self.robot = robot or Robot(x=450.0, y=350.0, theta=0.0)
+        env = self.environment
+        robot_x = (env.grid_left + env.grid_right) / 2
+        robot_y = (env.grid_top + env.grid_bottom) / 2
+        self.robot = robot or Robot(x=robot_x, y=robot_y, theta=0.0)
         self.lidar = lidar or Lidar(num_rays=360, max_range=300.0)
         self.occupancy_grid = occupancy_grid
         self.mapper = mapper
@@ -82,15 +94,24 @@ class MainWindow:
         self.path_planner = path_planner
         
         # Режимы приложения
-        self.current_app_mode = initial_mode  # "editor" или "blind"
+        self.current_app_mode = initial_mode  # "editor", "blind", "mapping", "localization"
         self.map_editor_mode = MapEditorMode(self.environment)
         self.blind_robot_mode = BlindRobotMode(self.robot, self.environment, self.lidar)
+        self.mapping_mode = MappingMode(self.robot, self.environment, self.lidar)
+        self.localization_mode = LocalizationMode(self.robot, self.environment, self.lidar)
+        self.navigation_mode = NavigationMode(self.robot, self.environment)
         
-        # Кнопки для переключения режимов (справа)
+        # Для режима локализации - оцененная позиция
+        self.estimated_pose = None
+        self.localization_confidence = 0.0
+        self._localization_frame_counter = 0  # Локализация раз в N кадров
+        
+        # Если начальный режим - картографирование, размещаем робота в случайной клетке
+        if self.current_app_mode == AppMode.MAPPING and self.occupancy_grid:
+            self._reset_mapping_mode()
+        
+        # Кнопки (только редактор, сохранение, загрузка; режимы 1, 2, 3 — по клавишам)
         self.button_editor_rect = pygame.Rect(width - 200, height - 120, 180, 40)
-        self.button_blind_rect = pygame.Rect(width - 200, height - 70, 180, 40)
-        
-        # Кнопки для сохранения/загрузки карты
         self.button_save_rect = pygame.Rect(width - 200, height - 170, 180, 40)
         self.button_load_rect = pygame.Rect(width - 200, height - 220, 180, 40)
         
@@ -136,12 +157,24 @@ class MainWindow:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+                elif event.key == pygame.K_1:
+                    # Режим картографирования (робот остаётся на месте)
+                    self.current_app_mode = AppMode.MAPPING
+                elif event.key == pygame.K_2:
+                    # Режим локализации
+                    self.current_app_mode = AppMode.LOCALIZATION
+                    self._reset_localization_mode()
+                elif event.key == pygame.K_3:
+                    # Режим навигации
+                    self.current_app_mode = AppMode.NAVIGATION
                 elif event.key == pygame.K_c:
                     # Очистка
                     if self.current_app_mode == AppMode.EDITOR:
                         self.environment.obstacles.clear_placed_obstacles()
-                    elif self.current_app_mode == AppMode.BLIND_ROBOT:
-                        self.blind_robot_mode.clear_history()
+                    elif self.current_app_mode == AppMode.MAPPING:
+                        if self.occupancy_grid and self.mapper:
+                            self.mapper.reset()
+                            self._reset_mapping_mode()
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Проверка клика по кнопкам
@@ -151,14 +184,20 @@ class MainWindow:
                     self._load_map()
                 elif self.button_editor_rect.collidepoint(mouse_pos):
                     self.current_app_mode = AppMode.EDITOR
-                elif self.button_blind_rect.collidepoint(mouse_pos):
-                    self.current_app_mode = AppMode.BLIND_ROBOT
-                    # Сбрасываем историю при переходе в режим слепого робота
-                    self.blind_robot_mode.clear_history()
                 else:
                     # Передача события текущему режиму
                     if self.current_app_mode == AppMode.EDITOR:
                         self.map_editor_mode.on_mouse_click(mouse_pos, event.button)
+                    elif self.current_app_mode == AppMode.NAVIGATION and event.button == 1:
+                        # ЛКМ — установка цели и построение пути
+                        if self.path_planner and self.occupancy_grid:
+                            found = self.navigation_mode.set_goal(
+                                mouse_pos, self.path_planner, self.occupancy_grid
+                            )
+                            if found:
+                                print(f"Путь найден, длина: {self.navigation_mode.path_length:.1f}")
+                            else:
+                                print("Путь не найден или цель недоступна")
             
             elif event.type == pygame.MOUSEMOTION:
                 # Обновление режима редактора
@@ -171,12 +210,26 @@ class MainWindow:
         
         if self.current_app_mode == AppMode.EDITOR:
             self.map_editor_mode.update(dt, keys)
-        elif self.current_app_mode == AppMode.BLIND_ROBOT:
-            self.blind_robot_mode.update(dt, keys)
+        elif self.current_app_mode == AppMode.MAPPING:
+            self.mapping_mode.update(dt, keys)
             
-            # Обновление карты занятости
-            if self.mapper and self.blind_robot_mode.last_scan:
-                self.mapper.update_from_scan(self.blind_robot_mode.last_scan)
+            # Обновление карты занятости на основе сканов лидара
+            if self.mapper and self.mapping_mode.last_scan:
+                self.mapper.update_from_scan(self.mapping_mode.last_scan)
+        elif self.current_app_mode == AppMode.LOCALIZATION:
+            self.localization_mode.update(dt, keys)
+        elif self.current_app_mode == AppMode.NAVIGATION:
+            self.navigation_mode.update(dt, keys)
+            
+            # Локализация раз в 15 кадров (для производительности)
+            self._localization_frame_counter += 1
+            if (self.localizer and self.localization_mode.last_scan and self.occupancy_grid
+                    and self._localization_frame_counter >= 15):
+                self._localization_frame_counter = 0
+                odometry_pose = self.robot.get_odometry()
+                result = self.localizer.localize(self.localization_mode.last_scan, odometry_pose)
+                self.estimated_pose = Point(result.pose.x, result.pose.y)
+                self.localization_confidence = result.confidence
     
     def render(self) -> None:
         """Отрисовывает содержимое."""
@@ -187,22 +240,53 @@ class MainWindow:
             # Режим выбора позиции робота
             self._render_position_selection_mode()
         elif self.current_app_mode == AppMode.EDITOR:
-            # Режим редактора карты
             self._render_editor_mode()
-        elif self.current_app_mode == AppMode.BLIND_ROBOT:
-            # Режим слепого робота
-            self._render_blind_robot_mode()
+        elif self.current_app_mode == AppMode.MAPPING:
+            # Режим картографирования
+            self._render_mapping_mode()
+        elif self.current_app_mode == AppMode.LOCALIZATION:
+            self._render_localization_mode()
+        elif self.current_app_mode == AppMode.NAVIGATION:
+            self._render_navigation_mode()
         
         # Отрисовка кнопок
         self._render_buttons()
+        
+        # Отрисовка мини-карты (если есть карта занятости)
+        if self.occupancy_grid and self.current_app_mode in [AppMode.MAPPING, AppMode.LOCALIZATION, AppMode.NAVIGATION]:
+            robot_point = Point(self.robot.pose.x, self.robot.pose.y)
+            estimated_point = self.estimated_pose if self.current_app_mode == AppMode.LOCALIZATION else None
+            self.renderer.render_minimap(
+                self.occupancy_grid,
+                robot_pose=robot_point,
+                estimated_pose=estimated_point,
+                size=200,
+                position=(self.width - 210, 10)
+            )
         
         # Отрисовка HUD
         info = {'fps': self.clock.get_fps()}
         if self.selecting_robot_position:
             mode_name = "Выбор позиции робота"
+        elif self.current_app_mode == AppMode.MAPPING:
+            mode_name = "Картографирование"
+            if self.mapper:
+                info['mapping_progress'] = self.mapper.get_completion_percentage()
+        elif self.current_app_mode == AppMode.LOCALIZATION:
+            mode_name = "Локализация"
+            info['localization_confidence'] = self.localization_confidence
+        elif self.current_app_mode == AppMode.NAVIGATION:
+            mode_name = "Навигация"
+            if self.navigation_mode.path_found:
+                info['path_length'] = self.navigation_mode.path_length
         else:
-            mode_name = "Редактор карты" if self.current_app_mode == AppMode.EDITOR else "Слепой робот"
-        self.hud.render(self.robot, SimulationMode.MAPPING, info)
+            mode_name = "Редактор карты"
+
+        sim_mode = SimulationMode.MAPPING if self.current_app_mode == AppMode.MAPPING else \
+                   SimulationMode.LOCALIZATION if self.current_app_mode == AppMode.LOCALIZATION else \
+                   SimulationMode.NAVIGATION if self.current_app_mode == AppMode.NAVIGATION else \
+                   SimulationMode.MAPPING
+        self.hud.render(self.robot, sim_mode, info)
         
         # Обновление экрана
         pygame.display.flip()
@@ -220,11 +304,14 @@ class MainWindow:
     
     def _render_blind_robot_mode(self) -> None:
         """Отрисовывает режим слепого робота."""
-        # Сначала отрисовываем среду (препятствия)
-        self.renderer.render_environment(self.environment)
+        # Среда без границ (границы рисуем поверх тумана)
+        self.renderer.render_environment(self.environment, draw_boundaries=False)
         
         # Отрисовка режима слепого робота (туман войны)
         self.blind_robot_mode.render(self.screen)
+        
+        # Жёлтые границы поверх тумана (всегда видны)
+        self.renderer.render_boundary_obstacles(self.environment)
         
         # Отрисовка лидара (только зеленые точки)
         if self.blind_robot_mode.last_scan:
@@ -240,23 +327,135 @@ class MainWindow:
         if self.robot.trajectory:
             self.renderer.render_trajectory(self.robot.trajectory)
     
+    def _render_mapping_mode(self) -> None:
+        """Отрисовывает режим картографирования."""
+        # Отрисовка сетки
+        self._draw_grid()
+        
+        # Отрисовка среды (препятствия)
+        self.renderer.render_environment(self.environment)
+        
+        # Отрисовка карты занятости (полупрозрачно)
+        if self.occupancy_grid:
+            self.renderer.render_occupancy_grid(self.occupancy_grid, alpha=128)
+        
+        # Отрисовка лидара
+        if self.mapping_mode.last_scan:
+            self.renderer.render_lidar_scan(
+                self.mapping_mode.last_scan,
+                "points"
+            )
+        
+        # Отрисовка робота
+        self.renderer.render_robot(self.robot)
+        
+        # Отрисовка траектории
+        if self.robot.trajectory:
+            self.renderer.render_trajectory(self.robot.trajectory)
+    
+    def _render_localization_mode(self) -> None:
+        """Отрисовывает режим локализации."""
+        self._draw_grid()
+        self.renderer.render_environment(self.environment)
+        self.renderer.render_robot(self.robot)
+        if self.robot.trajectory:
+            self.renderer.render_trajectory(self.robot.trajectory)
+    
+    def _render_navigation_mode(self) -> None:
+        """Отрисовывает режим навигации."""
+        self._draw_grid()
+        self.renderer.render_environment(self.environment)
+        
+        # Карта занятости (полупрозрачно)
+        if self.occupancy_grid:
+            self.renderer.render_occupancy_grid(self.occupancy_grid, alpha=128)
+        
+        # Путь — красная линия от текущей позиции робота до цели
+        if self.navigation_mode.path:
+            path_with_start = [Point(self.robot.pose.x, self.robot.pose.y)] + list(self.navigation_mode.path)
+            self.renderer.render_path(path_with_start, color=(255, 0, 0))
+        
+        # Цель (красный круг)
+        if self.navigation_mode.goal:
+            self.renderer.render_goal(self.navigation_mode.goal)
+        
+        self.renderer.render_robot(self.robot)
+        if self.robot.trajectory:
+            self.renderer.render_trajectory(self.robot.trajectory)
+    
+    def _reset_mapping_mode(self) -> None:
+        """Сбрасывает режим картографирования и размещает робота в случайной клетке."""
+        if not self.occupancy_grid:
+            return
+        
+        # Размещаем робота в центре случайной клетки
+        # Получаем случайные индексы ячейки
+        random_i = random.randint(0, self.occupancy_grid.height - 1)
+        random_j = random.randint(0, self.occupancy_grid.width - 1)
+        
+        # Преобразуем в мировые координаты (центр ячейки)
+        world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+        
+        # Проверяем, что позиция валидна
+        if self.environment.is_valid_position(world_point, self.robot.radius):
+            self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+            self.robot.clear_trajectory()
+        else:
+            # Если позиция невалидна, пробуем другую
+            for _ in range(10):  # Максимум 10 попыток
+                random_i = random.randint(0, self.occupancy_grid.height - 1)
+                random_j = random.randint(0, self.occupancy_grid.width - 1)
+                world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+                if self.environment.is_valid_position(world_point, self.robot.radius):
+                    self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+                    self.robot.clear_trajectory()
+                    break
+    
+    def _reset_localization_mode(self) -> None:
+        """Сбрасывает режим локализации и телепортирует робота в случайное место."""
+        if not self.occupancy_grid:
+            return
+        
+        # Телепортируем робота в случайное место
+        random_i = random.randint(0, self.occupancy_grid.height - 1)
+        random_j = random.randint(0, self.occupancy_grid.width - 1)
+        world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+        
+        # Проверяем, что позиция валидна
+        if self.environment.is_valid_position(world_point, self.robot.radius):
+            self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+            self.robot.clear_trajectory()
+            # Сбрасываем оцененную позицию
+            self.estimated_pose = None
+            self.localization_confidence = 0.0
+            self._localization_frame_counter = 15  # Сразу запустить локализацию
+        else:
+            # Если позиция невалидна, пробуем другую
+            for _ in range(10):  # Максимум 10 попыток
+                random_i = random.randint(0, self.occupancy_grid.height - 1)
+                random_j = random.randint(0, self.occupancy_grid.width - 1)
+                world_point = self.occupancy_grid.grid_to_world(random_i, random_j)
+                if self.environment.is_valid_position(world_point, self.robot.radius):
+                    self.robot.set_position(world_point.x, world_point.y, random.uniform(0, 2 * math.pi))
+                    self.robot.clear_trajectory()
+                    self.estimated_pose = None
+                    self.localization_confidence = 0.0
+                    self._localization_frame_counter = 15
+                    break
+    
     def _draw_grid(self) -> None:
         """Отрисовывает сетку."""
-        GRID_SIZE = 100
-        GRID_START_X = 200
-        GRID_START_Y = 100
-        GRID_END_X = 1200
-        GRID_END_Y = 1100
-        
-        for x in range(GRID_START_X, GRID_END_X + 1, GRID_SIZE):
+        env = self.environment
+        gs = env.GRID_SIZE
+        for x in range(env.grid_left, env.grid_right + 1, gs):
             pygame.draw.line(
                 self.screen, (200, 200, 200),
-                (x, GRID_START_Y), (x, GRID_END_Y), 1
+                (x, env.grid_top), (x, env.grid_bottom), 1
             )
-        for y in range(GRID_START_Y, GRID_END_Y + 1, GRID_SIZE):
+        for y in range(env.grid_top, env.grid_bottom + 1, gs):
             pygame.draw.line(
                 self.screen, (200, 200, 200),
-                (GRID_START_X, y), (GRID_END_X, y), 1
+                (env.grid_left, y), (env.grid_right, y), 1
             )
     
     def _render_position_selection_mode(self) -> None:
@@ -308,14 +507,6 @@ class MainWindow:
         editor_text = font.render("Редактор карты", True, (0, 0, 0))
         text_rect = editor_text.get_rect(center=self.button_editor_rect.center)
         self.screen.blit(editor_text, text_rect)
-        
-        # Кнопка слепого робота
-        blind_color = (200, 100, 100) if self.current_app_mode == AppMode.BLIND_ROBOT else (150, 150, 150)
-        pygame.draw.rect(self.screen, blind_color, self.button_blind_rect)
-        pygame.draw.rect(self.screen, (0, 0, 0), self.button_blind_rect, 2)
-        blind_text = font.render("Слепой робот", True, (0, 0, 0))
-        text_rect = blind_text.get_rect(center=self.button_blind_rect.center)
-        self.screen.blit(blind_text, text_rect)
     
     def _save_map(self) -> None:
         """Сохраняет карту (препятствия) в файл."""

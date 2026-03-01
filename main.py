@@ -5,6 +5,7 @@
 import argparse
 import sys
 import os
+import tkinter as tk
 
 # Добавляем путь к корню проекта
 try:
@@ -47,15 +48,15 @@ def main():
     parser.add_argument(
         '--width',
         type=int,
-        default=1500,
-        help='Ширина окна (по умолчанию: 1500)'
+        default=None,
+        help='Ширина окна (по умолчанию: размер экрана минус отступы)'
     )
     
     parser.add_argument(
         '--height',
         type=int,
-        default=1200,
-        help='Высота окна (по умолчанию: 1200)'
+        default=None,
+        help='Высота окна (по умолчанию: размер экрана минус отступы)'
     )
     
     parser.add_argument(
@@ -75,10 +76,24 @@ def main():
     
     args = parser.parse_args()
     
+    # Размер окна: по умолчанию — экран минус отступы (края чуть меньше границ экрана)
+    if args.width is None or args.height is None:
+        root = tk.Tk()
+        root.withdraw()
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        root.destroy()
+        margin = 40  # отступ от краёв экрана в пикселях
+        width = args.width if args.width is not None else max(800, screen_w - 2 * margin)
+        height = args.height if args.height is not None else max(600, screen_h - 2 * margin)
+    else:
+        width = args.width
+        height = args.height
+    
     try:
         # Создаем приложение
         app = Application(config_path=args.config)
-        app.setup()
+        app.setup(width=width, height=height)
         
         # Загрузка карты, если указана
         if args.map and os.path.exists(args.map):
@@ -88,7 +103,7 @@ def main():
             print(f"Карта загружена из {args.map}")
         
         # Запускаем приложение
-        app.run(initial_mode=args.mode, width=args.width, height=args.height)
+        app.run(initial_mode=args.mode, width=width, height=height)
         
     except KeyboardInterrupt:
         print("\nПриложение прервано пользователем")

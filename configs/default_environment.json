@@ -1,8 +1,8 @@
 {
   "environment": {
     "name": "Default Room",
-    "width": 1000,
-    "height": 1000,
+    "width": 1500,
+    "height": 1200,
     "background_color": [40, 40, 40]
   },
   "obstacles": [

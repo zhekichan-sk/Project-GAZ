@@ -16,20 +16,30 @@ class MapEditorMode(BaseMode):
     def __init__(self, environment: Environment):
         super().__init__(SimulationMode.MAPPING)
         self.environment = environment
-        
-        # Параметры сетки
-        self.GRID_SIZE = 100
-        self.GRID_START_X = 200
-        self.GRID_START_Y = 100
-        self.GRID_END_X = 1200
-        self.GRID_END_Y = 1100
         self.PLACEMENT_AREA_WIDTH = 15
-        
-        # Параметры препятствия
         self.OBSTACLE_LENGTH = 100
         self.OBSTACLE_WIDTH = 5
-        
         self.hovered_edge = None
+    
+    @property
+    def GRID_SIZE(self) -> int:
+        return self.environment.GRID_SIZE
+    
+    @property
+    def GRID_START_X(self) -> int:
+        return self.environment.grid_left
+    
+    @property
+    def GRID_START_Y(self) -> int:
+        return self.environment.grid_top
+    
+    @property
+    def GRID_END_X(self) -> int:
+        return self.environment.grid_right
+    
+    @property
+    def GRID_END_Y(self) -> int:
+        return self.environment.grid_bottom
     
     def get_hovered_edge(self, mouse_x: float, mouse_y: float):
         """Определяет, на какой границе клетки находится мышь."""

@@ -9,6 +9,7 @@ from src.common.types import Point
 from src.common.geometry import distance
 from src.mapping.occupancy_grid import OccupancyGrid
 from .astar import AStar
+from .ant_colony import AntColony
 
 
 @dataclass
@@ -20,17 +21,20 @@ class PathPlanningResult:
 
 
 class PathPlanner:
-    """Планировщик пути с использованием A*."""
+    """Планировщик пути (муравьиные колонии / A*)."""
     
-    def __init__(self, grid: OccupancyGrid, robot_radius: float):
+    def __init__(self, grid: OccupancyGrid, robot_radius: float, use_aco: bool = True):
         """
         Args:
             grid: карта занятости
             robot_radius: радиус робота
+            use_aco: True — муравьиные колонии, False — A*
         """
         self.grid = grid
         self.robot_radius = robot_radius
+        self.use_aco = use_aco
         self.astar = AStar(grid, robot_radius)
+        self.ant_colony = AntColony(grid, robot_radius)
     
     def plan(self, start: Point, goal: Point) -> PathPlanningResult:
         """
@@ -43,9 +47,14 @@ class PathPlanner:
         Returns:
             PathPlanningResult с путем и информацией
         """
-        path = self.astar.find_path(start, goal)
+        if self.use_aco:
+            path = self.ant_colony.find_path(start, goal)
+            if path is None:
+                path = self.astar.find_path(start, goal)
+        else:
+            path = self.astar.find_path(start, goal)
         
-        if path is None:
+        if path is None or len(path) < 2:
             return PathPlanningResult(
                 path=[],
                 length=0.0,
@@ -125,7 +134,8 @@ class PathPlanner:
             True если цель достижима
         """
         goal_i, goal_j = self.grid.world_to_grid(goal)
-        return self.astar.is_valid_cell(goal_i, goal_j)
+        checker = self.ant_colony if self.use_aco else self.astar
+        return checker.is_valid_cell(goal_i, goal_j)
     
     def get_path_length(self, path: List[Point]) -> float:
         """

@@ -53,8 +53,13 @@ class Application:
         self.path_planner: Optional[PathPlanner] = None
         self.main_window: Optional[MainWindow] = None
     
-    def setup(self) -> None:
-        """Инициализация всех модулей."""
+    def setup(self, width: Optional[int] = None, height: Optional[int] = None) -> None:
+        """Инициализация всех модулей.
+        
+        Args:
+            width: ширина окна (если None — из конфига)
+            height: высота окна (если None — из конфига)
+        """
         # Загрузка конфигурации
         if self.config_path and os.path.exists(self.config_path):
             env_config = load_environment_config(self.config_path)
@@ -67,9 +72,9 @@ class Application:
             env_config = load_environment_config(default_env_path) if os.path.exists(default_env_path) else {}
             robot_config = load_robot_config(default_robot_path) if os.path.exists(default_robot_path) else {}
         
-        # Инициализация среды
-        width = env_config.get('environment', {}).get('width', 1500)
-        height = env_config.get('environment', {}).get('height', 1200)
+        # Инициализация среды (размер окна приоритетнее конфига)
+        width = width or env_config.get('environment', {}).get('width', 1500)
+        height = height or env_config.get('environment', {}).get('height', 1200)
         self.environment = Environment(width, height, Obstacles())
         
         # Инициализация робота

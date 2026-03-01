@@ -144,8 +144,8 @@ class AStar:
         if not self.inflated_grid.is_in_bounds(i, j):
             return False
         
-        # Ячейка свободна если вероятность занятости < 0.5
-        return self.inflated_grid.get_cell(i, j) < 0.5
+        # Ячейка свободна если вероятность занятости <= 0.5 (включая неизвестные)
+        return self.inflated_grid.get_cell(i, j) <= 0.5
     
     def find_path(self, start: Point, goal: Point) -> Optional[List[Point]]:
         """

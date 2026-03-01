@@ -20,13 +20,14 @@ class ScanMatcher:
         """
         self.grid = grid
     
-    def compute_score(self, scan: LidarScan, pose: Pose) -> float:
+    def compute_score(self, scan: LidarScan, pose: Pose, step: int = 10) -> float:
         """
         Вычисляет оценку совпадения скана с картой для данной позы.
         
         Args:
             scan: скан лидара
             pose: поза робота для проверки
+            step: шаг выборки лучей (1=все, 10=каждый 10-й) для ускорения
             
         Returns:
             Оценка совпадения (высокий score = хорошее совпадение)
@@ -34,13 +35,18 @@ class ScanMatcher:
         score = 0.0
         valid_points = 0
         
-        for idx, point in enumerate(scan.points):
+        for idx in range(0, len(scan.points), step):
+            point = scan.points[idx]
             if idx >= len(scan.distances):
                 continue
             
             # Преобразуем точку скана в глобальные координаты с учетом новой позы
             # Угол луча относительно робота
-            ray_angle = scan.angles[idx] if idx < len(scan.angles) else 0.0
+            if hasattr(scan, 'angles') and idx < len(scan.angles):
+                ray_angle = scan.angles[idx]
+            else:
+                # Если углы недоступны, вычисляем из точки
+                ray_angle = math.atan2(point.y - scan.robot_pose.y, point.x - scan.robot_pose.x) - scan.robot_pose.theta
             dist = scan.distances[idx]
             
             # Глобальный угол
@@ -81,11 +87,11 @@ class ScanMatcher:
             (best_pose, confidence) - лучшая поза и уверенность
         """
         best_pose = initial_pose
-        best_score = self.compute_score(scan, initial_pose)
+        best_score = self.compute_score(scan, initial_pose, step=10)
         
-        # Параметры поиска
-        position_step = search_radius / 5.0  # 5 шагов по позиции
-        angle_step = angular_range / 10.0  # 10 шагов по углу
+        # Параметры поиска (уменьшено для производительности)
+        position_step = search_radius / 3.0  # 7 шагов по позиции
+        angle_step = angular_range / 5.0  # 11 шагов по углу
         
         # Поиск по позиции
         for dx in np.arange(-search_radius, search_radius + position_step, position_step):
@@ -98,7 +104,7 @@ class ScanMatcher:
                         initial_pose.theta + dtheta
                     )
                     
-                    score = self.compute_score(scan, test_pose)
+                    score = self.compute_score(scan, test_pose, step=10)
                     
                     if score > best_score:
                         best_score = score
